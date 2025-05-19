@@ -14,8 +14,8 @@
 
 ### NEW ANNOUNCEMENT
 
-Yes, this script streamlines the procedure and requirements for cross-seedd into one command. There are unique aspects to
-the ultra seedbox environment that are handled automatically.
+Yes, this script streamlines the procedure and requirements for cross-seed into one command. There are unique aspects to
+shared seedbox environments that are handled automatically.
 
 The script has been updated to account for the updated OS servers and the old style, and will handle both appropriately.
 
@@ -27,12 +27,13 @@ Please do. https://tip.ary.dev for my buymeacoffee.
 
 ## What is it?
 
-This is ultraxs (ultra.cc cross-seed installation script) - you simply set `chmod +x install_ultra_xs.sh`
+This is cross-seed-legacy (originally ultra.cc cross-seed installation script) - you simply set `chmod +x install_legacy_xs.sh`
 and run the script to install or update your instance of cross-seed.
 
 ## How do I use this?
 
-This is a quote from ultra.cc on [their Discord](https://discord.com/channels/427913240316477443/427914848702038026/1320729360700932190)
+This is a quote from ultra.cc on [their Discord](https://discord.com/channels/427913240316477443/427914848702038026/1320729360700932190) - this should work on all shared seedbox environments in the same way. If you have issues, visit the
+cross-seed discord for support or open an issue.
 
 ### Versions of the following software need to be explicitly followed!
 
@@ -42,9 +43,9 @@ This is a quote from ultra.cc on [their Discord](https://discord.com/channels/42
 >
 > - Install **v3.10 or above** version of [Python](https://docs.ultra.cc/books/unofficial-language-installers-3AK/page/install-python-using-pyenv): `bash <(wget -qO- https://scripts.ultra.cc/util-v2/LanguageInstaller/Python-Installer/main.sh)`
 >
-> Then, with thanks to the dev from cross-seed, Zakary, who has created a custom script:
+> Then, with thanks to the dev from cross-seed, zakkarry, who has created a custom script:
 >
-> - Install cross seed with `bash <(wget -qO- https://raw.githubusercontent.com/zakkarry/ultraxs/refs/heads/master/install_ultra_xs.sh)`
+> - Install cross seed with `bash <(wget -qO- https://raw.githubusercontent.com/zakkarry/cross-seed-legacyOS/refs/heads/master/install_legacy_xs.sh)`
 
 ### Notes on required versions
 
