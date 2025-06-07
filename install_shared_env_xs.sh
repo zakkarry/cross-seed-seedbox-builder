@@ -1,14 +1,16 @@
 #!/bin/bash
 #
 # This cross-seed install script is written by zakkarry (https://github.com/zakkarry)
-# a cross-seed dev working to bring cross-seed to legacy OS's which do not have support
-# for proper glibc or other compiling libraries.
+# a cross-seed dev working to bring cross-seed to legacy OS's and shared seedbox environments
+# which do not have support for system node/python and current glibc or other compiling libraries
+# potentially used by gyp during typescript compiling/transpiling.
 #
-# There is also (if supported by your OS) the option to install the master or nightly branch
-# if you do not have the capabilities to do so via Docker or npm due to permissions, etc
+# There is also the option to install the master or nightly branch as well as stable builds
+# if you do not have the capabilities to do so via Docker or npm due to permissions or other limitations
 #
 # If you find any problems or would like to make any suggestions, you can make a
-# GitHub issue on the repository for this script at https://github.com/zakkarry/cross-seed-legacy
+# GitHub issue on the repository for this script at https://github.com/zakkarry/cross-seed-seedbox-builder/issues
+# or contact via discord at https://discord.gg/jpbUFzS5Wb
 
 # Define the directory to check
 CS_GIT_DIR="$HOME/.xs-git"
