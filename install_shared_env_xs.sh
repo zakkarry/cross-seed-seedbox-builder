@@ -138,15 +138,32 @@ if [ -d "$CS_GIT_DIR" ]; then
   echo "Local version detected: $local_version"
   echo
   # shellcheck disable=SC2162
-  read -p "Do you want to reinstall/replace your local version with the selected version ($INSTALL_BRANCH) of cross-seed? (y/n): " choice
+  read -p "Do you want to reinstall/replace your local version with the selected version ($INSTALL_BRANCH) of cross-seed if there is an update available? (y/n): " choice
   
   if [ "$choice" == "y" ]; then
-    if [ "$INSTALL_BRANCH" == "master" ]; then
-      latest_version=$(get_last_version_remote)
-    else
-      latest_version=$(get_latest_version_remote)
+      if [ "$INSTALL_BRANCH" == "master" ]; then
+        latest_version=$(get_last_version_remote)
+      else
+        latest_version=$(get_latest_version_remote)
+      fi
+      echo "Latest version: $latest_version"
+        if [ "$INSTALL_BRANCH" == "nightly" ]; then
+          echo
+          echo "You've selected nightly, which may have mismatched versioning relative to stable/master"
+          echo "Nightly installation requires clearing all current source and build data (your config will not be affected)"
+          echo "Please be sure you want to install this branch, as it is extremely experimental!"
+          echo
+          # shellcheck disable=SC2162
+          read -p "Do you want to install/update to nightly? (y/n): " nightly_confirm
+          if [ "$nightly_confirm" != "y" ]; then
+            echo
+            echo "Exiting to avoid switching to nightly (experimental) branch!"
+            echo
+            exit 1
+          fi
+        fi
+      fi
     fi
-    echo "Latest version: $latest_version"
     echo
     
     if [ "$local_version" == "N/A" ]; then
@@ -195,7 +212,7 @@ if [ -d "$CS_GIT_DIR" ]; then
         echo "Reinstallation canceled."
         exit 0
       fi
-    elif [ "$local_version" != "$latest_version" ]; then
+    elif [ "$local_version" != "$latest_version" ] && [ "$INSTALL_BRANCH" != "nightly" ]; then
       echo "A different version than your local has been selected or is available."
       # shellcheck disable=SC2162
       read -p "Do you want to (re)install/update? (y/n): " update_choice
@@ -238,6 +255,48 @@ if [ -d "$CS_GIT_DIR" ]; then
         echo "Update canceled."
         exit 0
       fi
+    elif  [ "$INSTALL_BRANCH" == "nightly" ]; then
+      cleanup_all_old_dirs
+       # FRESH INSTALLATION LOGIC
+      echo "Local installation not present."
+      echo
+      # shellcheck disable=SC2162
+      read -p "Do you want to install the selected version ($INSTALL_BRANCH) of cross-seed? (y/n): " choice
+      
+      if [ "$choice" == "y" ]; then
+        echo "Directory $CS_GIT_DIR does not exist. The cross-seed repository will be cloned to this directory."
+        echo
+        # shellcheck disable=SC2162
+        read -p "Do you want to install? (y/n): " install_choice
+        echo
+        if [ "$install_choice" == "y" ]; then
+          echo "Installing..."
+          if ! git clone https://github.com/cross-seed/cross-seed.git "$CS_GIT_DIR"; then
+            echo "Error: Failed to clone repository. Check your internet connection."
+            exit 1
+          fi
+          cd "$CS_GIT_DIR" || exit 1
+          echo "$INSTALL_BRANCH"
+          if ! git checkout "$INSTALL_BRANCH"; then
+            echo "Error: Failed to checkout branch $INSTALL_BRANCH"
+            exit 1
+          fi
+          if [ "$INSTALL_BRANCH" == "legacy" ]; then
+            sed -i 's/"better-sqlite3": "\^11\.5\.0",/"better-sqlite3": "^9.4.0",/' "$PACKAGE_JSON"
+          fi
+          if ! npm install .; then
+              echo "Error: npm install failed. Check your Node.js installation. The README on the GitHub repository contains installation instructions for nvm if you need them."
+              exit 1
+          fi
+          echo
+          echo "Transpiling cross-seed..."
+          if ! npm run build; then
+            echo "Error: Build failed"
+            exit 1
+          fi
+          echo "Installation complete."
+          echo
+          setup_alias
     else
       echo "You are already on the selected version."
       echo
