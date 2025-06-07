@@ -34,7 +34,7 @@ and you can then always just re-run the script to install a different version or
 
 ## This is my first time, what do I do?
 
-Follo wthe instructions below in order, and make sure you choose the correct versions. If you have any issues, feel free to come visit us [at our discord](https://discord.gg/jpbUFzS5Wb).
+Follow the instructions below in order, and make sure you choose the correct versions. If you have any issues, feel free to come visit us [at our discord](https://discord.gg/jpbUFzS5Wb).
 
 ### Versions of the following software need to be explicitly followed!
 
