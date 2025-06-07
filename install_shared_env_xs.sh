@@ -25,7 +25,15 @@ get_local_version() {
 }
 
 check_dependencies() {
-    for cmd in git npm node curl python; do
+    # Check for python or python3 separately
+    if ! command -v python >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
+        echo "Error: python or python3 is required but not installed."
+        echo "Please reference the README on the GitHub repository for instructions on installation or contact cross-seed support."
+        exit 1
+    fi
+    
+    # Check other dependencies normally
+    for cmd in git npm node curl; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             echo "Error: $cmd is required but not installed."
             echo "Please reference the README on the GitHub repository for instructions on installation or contact cross-seed support."
