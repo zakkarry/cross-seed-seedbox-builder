@@ -120,11 +120,13 @@ cleanup_old_dirs() {
 
 # Function to set up alias for cross-seed daemon
 setup_alias() {
+  ALIAS_SNIPPET="alias cross-seed="
   ALIAS_CMD="alias cross-seed=\"NODE_OPTIONS=--disable-wasm-trap-handler NODE_VERSION=22 node $CS_GIT_DIR/dist/cmd.js\""
-  if ! grep -Fxq "$ALIAS_CMD" "$HOME/.bashrc"; then
+  if ! grep -Fxq "$ALIAS_SNIPPET" "$HOME/.bashrc"; then
     echo "$ALIAS_CMD" >>"$HOME/.bashrc"
     echo "Alias 'cross-seed' added. Please restart your shell or run 'source ~/.bashrc' before attempting to start cross-seed."
   else
+    sed -i 's/\.cs-ultra/\.xs-git/g' ~/.bashrc
     echo "Alias 'cross-seed' is already set up. You may run cross-seed now."
   fi
   echo
