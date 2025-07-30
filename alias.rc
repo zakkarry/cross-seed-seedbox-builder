@@ -1,0 +1,14 @@
+cross-seed() {
+    CS_GIT_DIR="$HOME/.xs-git"
+    if [[ "$1" == "stop" ]]; then
+        echo "Stopping cross-seed processes..."
+        pkill -f "$CS_GIT_DIR/dist/cmd.js"
+        if [[ $? -eq 0 ]]; then
+            echo "Cross-seed processes stopped."
+        else
+            echo "No cross-seed processes found."
+        fi
+    else
+        NODE_OPTIONS=--disable-wasm-trap-handler NODE_VERSION=22 node "$HOME/.xs-git/dist/cmd.js" "$@"
+    fi
+}
