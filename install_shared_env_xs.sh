@@ -59,11 +59,15 @@ get_os_version() {
         echo "1) stable (default/recommended latest stable release)"
         echo "2) master (latest including pre-releases)"
         echo "3) nightly (considered experimental!)"
+        echo "4) uninstall (remove cross-seed entirely)"
         # shellcheck disable=SC2162
         read -p "Enter your choice [1]: " choice
 
         # Process the selection
         case $choice in
+            4)
+                INSTALL_BRANCH="uninstall"
+                ;;
             3)
                 INSTALL_BRANCH="nightly"
                 ;;
@@ -78,7 +82,13 @@ get_os_version() {
                 INSTALL_BRANCH="stable"
                 ;;
         esac
-
+        if [[ "$INSTALL_BRANCH" == "uninstall" ]]; then
+            echo "Starting uninstall procedure..."
+            cleanup_all_old_dirs
+            sed -i '/^alias cross-seed=/d' "$HOME/.bashrc"
+            echo "Uninstall completed. Please run source ~/.bashrc and test if the cross-seed command is not functional."
+            exit 0
+        fi
         echo "You selected: $INSTALL_BRANCH"
     else
         echo "Unsupported OS version detected. Contact Support. Exiting."
@@ -112,22 +122,26 @@ get_stable_version() {
 cleanup_all_old_dirs() {
     rm -rf "$HOME/.cs-ultra"
     rm -rf "$CS_GIT_DIR"
+    pkill -f "$CS_GIT_DIR/dist/cmd.js"
+    sed -i '/^cross-seed *()/,/^}/d' ~/.bashrc
 }
 
 cleanup_old_dirs() {
     rm -rf "$HOME/.cs-ultra"
 }
 
-# Function to set up alias for cross-seed daemon
 setup_alias() {
   ALIAS_SNIPPET="alias cross-seed="
-  ALIAS_CMD="alias cross-seed=\"NODE_OPTIONS=--disable-wasm-trap-handler NODE_VERSION=22 node $CS_GIT_DIR/dist/cmd.js\""
-  if ! grep -Fxq "$ALIAS_SNIPPET" "$HOME/.bashrc"; then
-    echo "$ALIAS_CMD" >>"$HOME/.bashrc"
-    echo "Alias 'cross-seed' added. Please restart your shell or run 'source ~/.bashrc' before attempting to start cross-seed."
-  else
-    sed -i 's/\.cs-ultra/\.xs-git/g' ~/.bashrc
-    echo "Alias 'cross-seed' is already set up. You may run cross-seed now."
+  if grep -Fxq "$ALIAS_SNIPPET" "$HOME/.bashrc"; then
+    sed -i '/\.xs-git\|\.cs-ultra/d' ~/.bashrc
+  fi
+    echo "Downloading and appending to .bashrc..."
+    if curl -fsSL https://raw.githubusercontent.com/zakkarry/cross-seed-seedbox-builder/refs/heads/master/alias.rc >> "$HOME/.bashrc"; then
+      echo "Successfully appended remote content to .bashrc"
+      echo "Run 'source ~/.bashrc' or restart your shell to apply changes"
+    elif ! grep -Fxq "cross-seed()" "$HOME/.bashrc"; then
+      echo "Error: Failed to download or append file for alias. Please contact support."
+      exit 1
   fi
   echo
 }
