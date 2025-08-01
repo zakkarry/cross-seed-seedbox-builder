@@ -1,391 +1,288 @@
 #!/bin/bash
 #
-# This cross-seed install script is written by zakkarry (https://github.com/zakkarry)
-# a cross-seed dev working to bring cross-seed to legacy OS's and shared seedbox environments
-# which do not have support for system node/python and current glibc or other compiling libraries
-# potentially used by gyp during typescript compiling/transpiling.
+# Cross-seed install script by zakkarry (https://github.com/zakkarry)
+# Installs cross-seed on legacy OS and shared seedbox environments
+# Supports stable, master, nightly, and legacy branches
 #
-# There is also the option to install the master or nightly branch as well as stable builds
-# if you do not have the capabilities to do so via Docker or npm due to permissions or other limitations
-#
-# If you find any problems or would like to make any suggestions, you can make a
-# GitHub issue on the repository for this script at https://github.com/zakkarry/cross-seed-seedbox-builder/issues
-# or contact via discord at https://discord.gg/jpbUFzS5Wb
+# Issues: https://github.com/zakkarry/cross-seed-seedbox-builder/issues
+# Discord: https://discord.gg/jpbUFzS5Wb
 
-# Define the directory to check
-CS_GIT_DIR="$HOME/.xs-git"
-PACKAGE_JSON="$CS_GIT_DIR/package.json"
+set -euo pipefail
+
+# Configuration
+readonly CS_GIT_DIR="$HOME/.xs-git"
+readonly PACKAGE_JSON="$CS_GIT_DIR/package.json"
+readonly BASHRC="$HOME/.bashrc"
+readonly ALIAS_URL="https://raw.githubusercontent.com/zakkarry/cross-seed-seedbox-builder/refs/heads/master/alias.rc"
+
 INSTALL_BRANCH="stable"
 
-# Function to parse the version from package.json
-get_local_version() {
-  if [ -f "$PACKAGE_JSON" ]; then
-    sed -n '3s/.*"\([^"]\+\)".*/v\1/p' "$PACKAGE_JSON"
-  else
-    echo "N/A"
-  fi
+# Utility functions
+log() { echo "$@"; }
+# shellcheck disable=SC2145
+error() { echo "Error: $@" >&2; exit 1; }
+confirm() { 
+    local prompt="${1:-Continue?}"
+    read -p "$prompt (y/n): " -r
+    [[ $REPLY =~ ^[Yy]$ ]]
 }
 
+# Dependency checking
 check_dependencies() {
-    # Check for python or python3 separately
+    local missing=()
+    
+    # Check for python/python3
     if ! command -v python >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
-        echo "Error: python or python3 is required but not installed."
-        echo "Please reference the README on the GitHub repository for instructions on installation or contact cross-seed support."
-        exit 1
+        missing+=("python or python3")
     fi
     
-    # Check other dependencies normally
+    # Check other dependencies
     for cmd in git npm node curl; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
-            echo "Error: $cmd is required but not installed."
-            echo "Please reference the README on the GitHub repository for instructions on installation or contact cross-seed support."
-            exit 1
+            missing+=("$cmd")
         fi
     done
-}
-
-get_os_version() {
-  if [ ! -f /etc/os-release ]; then
-    echo "Error: Cannot detect OS version. /etc/os-release not found."
-    echo "Proceeding with normal installation type. If you encounter issues contact cross-seed support."
-    VERSION_ID="11"
-  else
-    VERSION_ID=$(grep -oP '(?<=^VERSION_ID=)"?\K[0-9]+' /etc/os-release)
-    if [[ "$VERSION_ID" == "10" ]]; then
-        INSTALL_BRANCH="legacy"
-    elif [[ "$VERSION_ID" -gt 10 ]]; then
-        INSTALL_BRANCH="stable"
-        echo "Please select an option:"
-        echo "1) stable (default/recommended latest stable release)"
-        echo "2) master (latest including pre-releases)"
-        echo "3) nightly (considered experimental!)"
-        echo "4) uninstall (remove cross-seed entirely)"
-        # shellcheck disable=SC2162
-        read -p "Enter your choice [1]: " choice
-
-        # Process the selection
-        case $choice in
-            4)
-                INSTALL_BRANCH="uninstall"
-                ;;
-            3)
-                INSTALL_BRANCH="nightly"
-                ;;
-            2)
-                INSTALL_BRANCH="master"
-                ;;
-            1)
-                INSTALL_BRANCH="stable"
-                ;;
-            *)
-                echo "Invalid option. Using default: stable"
-                INSTALL_BRANCH="stable"
-                ;;
-        esac
-        if [[ "$INSTALL_BRANCH" == "uninstall" ]]; then
-            echo "Starting uninstall procedure..."
-            cleanup_all_old_dirs
-            sed -i '/^alias cross-seed=/d' "$HOME/.bashrc"
-            echo "Uninstall completed. Please run source ~/.bashrc and test if the cross-seed command is not functional."
-            exit 0
-        fi
-        echo "You selected: $INSTALL_BRANCH"
-    else
-        echo "Unsupported OS version detected. Contact Support. Exiting."
-        exit 1
+    
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        error "Missing dependencies: ${missing[*]}. Please reference the README for installation instructions."
     fi
-    echo
-    echo "Detected OS version successfully. Proceeding installation for cross-seed branch: $INSTALL_BRANCH"
-  fi
 }
 
-# Function to get the latest version from GitHub
-get_latest_version_remote() {
-  if ! curl -s https://api.github.com/repos/cross-seed/cross-seed/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'; then
-    echo "Error: Failed to fetch latest version from GitHub"
-    exit 1
-  fi
+# Version management
+get_local_version() {
+    [[ -f "$PACKAGE_JSON" ]] && sed -n '3s/.*"\([^"]\+\)".*/v\1/p' "$PACKAGE_JSON" || echo "N/A"
 }
 
-get_last_version_remote() {
-  if ! curl -s https://api.github.com/repos/cross-seed/cross-seed/releases | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | head -n 1; then
-    echo "Error: Failed to fetch releases from GitHub"
-    exit 1
-  fi
+get_remote_version() {
+    local endpoint="${1:-latest}"
+    local url="https://api.github.com/repos/cross-seed/cross-seed/releases"
+    [[ "$endpoint" == "latest" ]] && url+="/latest"
+    
+    curl -s "$url" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | head -n 1 ||
+        error "Failed to fetch version from GitHub"
 }
 
 get_stable_version() {
-    cd "$CS_GIT_DIR" || exit 1
-    git tag --sort=-v:refname | grep -v '-' | head -n 1
+    cd "$CS_GIT_DIR" && git tag --sort=-v:refname | grep -v '-' | head -n 1
 }
 
-cleanup_all_old_dirs() {
-    rm -rf "$HOME/.cs-ultra"
-    rm -rf "$CS_GIT_DIR"
-    pkill -f "$CS_GIT_DIR/dist/cmd.js"
-    sed -i '/^cross-seed *()/,/^}/d' ~/.bashrc
-}
-
-cleanup_old_dirs() {
-    rm -rf "$HOME/.cs-ultra"
-}
-
-setup_alias() {
-  ALIAS_SNIPPET="alias cross-seed="
-  if grep -Fxq "$ALIAS_SNIPPET" "$HOME/.bashrc"; then
-    sed -i '/\.xs-git\|\.cs-ultra/d' ~/.bashrc
-  fi
-    echo "Downloading and appending to .bashrc..."
-    if curl -fsSL https://raw.githubusercontent.com/zakkarry/cross-seed-seedbox-builder/refs/heads/master/alias.rc >> "$HOME/.bashrc"; then
-      echo "Successfully appended remote content to .bashrc"
-      echo "Run 'source ~/.bashrc' or restart your shell to apply changes"
-    elif ! grep -Fxq "cross-seed()" "$HOME/.bashrc"; then
-      echo "Error: Failed to download or append file for alias. Please contact support."
-      exit 1
-  fi
-  echo
-}
-
-check_dependencies
-get_os_version
-
-# Main logic
-if [ -d "$HOME/.cs-ultra" ]; then
-    echo
-    echo "Detected previous installation of ultra.cc cross-seed script..."
-    echo "Now purging source directory for legacy script (re)installation."
-    echo
-    cleanup_old_dirs
-fi
-
-if [ -d "$CS_GIT_DIR" ]; then
-  # EXISTING INSTALLATION LOGIC
-  local_version=$(get_local_version)
-  echo "Local version detected: $local_version"
-  echo
-  # shellcheck disable=SC2162
-  read -p "Do you want to reinstall/replace your local version with the selected version ($INSTALL_BRANCH) of cross-seed if there is an update available? (y/n): " choice
-  
-  if [ "$choice" == "y" ]; then
-      if [ "$INSTALL_BRANCH" == "master" ]; then
-        latest_version=$(get_last_version_remote)
-      else
-        latest_version=$(get_latest_version_remote)
-      fi
-      echo "Latest version: $latest_version"
-        if [ "$INSTALL_BRANCH" == "nightly" ]; then
-          echo
-          echo "You've selected nightly, which may have mismatched versioning relative to stable/master"
-          echo "Nightly installation requires clearing all current source and build data (your config will not be affected)"
-          echo "Please be sure you want to install this branch, as it is extremely experimental!"
-          echo
-          # shellcheck disable=SC2162
-          read -p "Do you want to install/update to nightly? (y/n): " nightly_confirm
-          if [ "$nightly_confirm" != "y" ]; then
-            echo
-            echo "Exiting to avoid switching to nightly (experimental) branch!"
-            echo
-            exit 1
-          fi
-        fi
-      fi
+# OS detection and branch selection
+detect_os_and_select_branch() {
+    if [[ ! -f /etc/os-release ]]; then
+        log "OS release file not found. Attempting to reinstall base-files...you may be prompted to enter sudo password..."
+        echo
+        sudo apt-get install --reinstall base-files || true
+        [[ ! -f /etc/os-release ]] && log "Warning: Could not detect OS version, proceeding with default."
+        echo
     fi
-    echo
     
-    if [ "$local_version" == "N/A" ]; then
-      echo "Critical files are missing or corrupted/faulty install has been detected."
-      echo "Full reinstallation is necessary."
-      echo
-      # shellcheck disable=SC2162
-      read -p "Do you want to proceed? (y/n): " reinstall_choice
-      echo
-      if [ "$reinstall_choice" == "y" ]; then
-        echo "Reinstalling..."
+    local version_id
+    version_id=$(grep -oP '(?<=^VERSION_ID=)"?\K[0-9]+' /etc/os-release 2>/dev/null || echo "11")
+    
+    if [[ "$version_id" == "10" ]]; then
+        log "Detected Debian 10 (legacy). Only legacy installation available."
         echo
-        cleanup_all_old_dirs
-        if ! git clone https://github.com/cross-seed/cross-seed.git "$CS_GIT_DIR"; then
-          echo "Error: Failed to clone repository. Check your internet connection."
-          exit 1
-        fi
-        cd "$CS_GIT_DIR" || exit 1
-        echo "$INSTALL_BRANCH"
-        if [ "$INSTALL_BRANCH" == "stable" ]; then
-          INSTALL_BRANCH="${INSTALL_BRANCH/stable/$(get_stable_version)}"
-        fi
-        echo "$INSTALL_BRANCH"
-        if ! git checkout "$INSTALL_BRANCH"; then
-          echo "Error: Failed to checkout branch $INSTALL_BRANCH"
-          exit 1
-        fi
-        if [ "$INSTALL_BRANCH" == "legacy" ]; then
-          sed -i 's/"better-sqlite3": "\^11\.5\.0",/"better-sqlite3": "^9.4.0",/' "$PACKAGE_JSON"
-        fi
-        if ! npm install .; then
-            echo "Error: npm install failed. Check your Node.js installation. The README on the GitHub repository contains installation instructions for nvm if you need them."
-            exit 1
-        fi
+        select_option "legacy" "uninstall"
+    elif [[ "$version_id" -gt 10 ]]; then
+        log "Please select an option:"
+        select_option "stable" "master" "nightly" "uninstall"
         echo
-        echo "Transpiling cross-seed..."
-        if ! npm run build; then
-          echo "Error: Build failed"
-          exit 1
-        fi
-        echo "Reinstallation complete."
-        echo
-        setup_alias
-        exit 0
-      else
-        echo "Reinstallation canceled."
-        exit 0
-      fi
-    elif [ "$local_version" != "$latest_version" ] && [ "$INSTALL_BRANCH" != "nightly" ]; then
-      echo "A different version than your local has been selected or is available."
-      # shellcheck disable=SC2162
-      read -p "Do you want to (re)install/update? (y/n): " update_choice
-      if [ "$update_choice" == "y" ]; then
-        echo "Installing selected version ($INSTALL_BRANCH): $latest_version"
-        echo
-        cleanup_all_old_dirs
-        if ! git clone https://github.com/cross-seed/cross-seed.git "$CS_GIT_DIR"; then
-          echo "Error: Failed to clone repository. Check your internet connection."
-          exit 1
-        fi
-        cd "$CS_GIT_DIR" || exit 1
-        echo "$INSTALL_BRANCH"
-        if [ "$INSTALL_BRANCH" == "stable" ]; then
-          INSTALL_BRANCH="${INSTALL_BRANCH/stable/$(get_stable_version)}"
-        fi
-        echo "$INSTALL_BRANCH"
-        if ! git checkout "$INSTALL_BRANCH"; then
-          echo "Error: Failed to checkout branch $INSTALL_BRANCH"
-          exit 1
-        fi
-        if [ "$INSTALL_BRANCH" == "legacy" ]; then
-          sed -i 's/"better-sqlite3": "\^11\.5\.0",/"better-sqlite3": "^9.4.0",/' "$PACKAGE_JSON"
-        fi
-        if ! npm install .; then
-            echo "Error: npm install failed. Check your Node.js installation. The README on the GitHub repository contains installation instructions for nvm if you need them."
-            exit 1
-        fi
-        echo
-        echo "Transpiling cross-seed..."
-        if ! npm run build; then
-          echo "Error: Build failed"
-          exit 1
-        fi
-        echo "Update complete."
-        echo
-        setup_alias
-        exit 0
-      else
-        echo "Update canceled."
-        exit 0
-      fi
-    elif  [ "$INSTALL_BRANCH" == "nightly" ]; then
-      cleanup_all_old_dirs
-       # FRESH INSTALLATION LOGIC
-      echo "Local installation not present."
-      echo
-      # shellcheck disable=SC2162
-      read -p "Do you want to install the selected version ($INSTALL_BRANCH) of cross-seed? (y/n): " choice
-      
-      if [ "$choice" == "y" ]; then
-        echo "Directory $CS_GIT_DIR does not exist. The cross-seed repository will be cloned to this directory."
-        echo
-        # shellcheck disable=SC2162
-        read -p "Do you want to install? (y/n): " install_choice
-        echo
-        if [ "$install_choice" == "y" ]; then
-          echo "Installing..."
-          if ! git clone https://github.com/cross-seed/cross-seed.git "$CS_GIT_DIR"; then
-            echo "Error: Failed to clone repository. Check your internet connection."
-            exit 1
-          fi
-          cd "$CS_GIT_DIR" || exit 1
-          echo "$INSTALL_BRANCH"
-          if ! git checkout "$INSTALL_BRANCH"; then
-            echo "Error: Failed to checkout branch $INSTALL_BRANCH"
-            exit 1
-          fi
-          if [ "$INSTALL_BRANCH" == "legacy" ]; then
-            sed -i 's/"better-sqlite3": "\^11\.5\.0",/"better-sqlite3": "^9.4.0",/' "$PACKAGE_JSON"
-          fi
-          if ! npm install .; then
-              echo "Error: npm install failed. Check your Node.js installation. The README on the GitHub repository contains installation instructions for nvm if you need them."
-              exit 1
-          fi
-          echo
-          echo "Transpiling cross-seed..."
-          if ! npm run build; then
-            echo "Error: Build failed"
-            exit 1
-          fi
-          echo "Installation complete."
-          echo
-          setup_alias
     else
-      echo "You are already on the selected version."
-      echo
-      echo "If you NEED to reinstall for some reason, delete the directory $CS_GIT_DIR and run the script again."
-      echo
-      exit 0
+        error "Unsupported OS version detected."
     fi
-  else
-    echo "Exiting."
+    
+    log "Detected OS version ($version_id). Installing cross-seed branch: $INSTALL_BRANCH"
+}
+
+select_option() {
+    local options=("$@")
+    local i=1
+    echo
+    for option in "${options[@]}"; do
+        case "$option" in
+            "stable") echo "$i) stable (default/recommended latest stable release)" ;;
+            "master") echo "$i) master (latest including pre-releases)" ;;
+            "nightly") echo "$i) nightly (considered experimental!)" ;;
+            "legacy") echo "$i) legacy (only available option with Debian <11)" ;;
+            "uninstall") echo "$i) uninstall (remove cross-seed entirely)" ;;
+        esac
+        ((i++))
+    done
+    
+    read -p "Enter your choice [1]: " -r choice
+    choice=${choice:-1}
+    echo
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le ${#options[@]} ]]; then
+        INSTALL_BRANCH="${options[$((choice-1))]}"
+    else
+        log "Invalid option. Using default: ${options[0]}"
+        INSTALL_BRANCH="${options[0]}"
+    fi
+    echo
+    [[ "$INSTALL_BRANCH" == "uninstall" ]] && uninstall_cross_seed
+    log "You selected: $INSTALL_BRANCH"
+    echo
+}
+
+# Cleanup functions
+cleanup_legacy() {
+    rm -rf "$HOME/.cs-ultra"
+}
+
+cleanup_all() {
+    echo
+    log "Removing all previous cross-seed installations..."
+    rm -rf "$HOME/.cs-ultra" "$CS_GIT_DIR"
+    pkill -f "$CS_GIT_DIR/dist/cmd.js" 2>/dev/null || true
+    sed -i '/^cross-seed *()/,/^}/d; /^alias cross-seed=/d' "$BASHRC"
+    echo
+}
+
+uninstall_cross_seed() {
+    echo
+    log "Starting uninstall procedure..."
+    cleanup_all
+    log "Cross-seed removed. Restart your shell or run 'source ~/.bashrc'"
+    echo
     exit 0
-  fi
-else
-  # FRESH INSTALLATION LOGIC
-  echo "Local installation not present."
-  echo
-  # shellcheck disable=SC2162
-  read -p "Do you want to install the selected version ($INSTALL_BRANCH) of cross-seed? (y/n): " choice
-  
-  if [ "$choice" == "y" ]; then
-    echo "Directory $CS_GIT_DIR does not exist. The cross-seed repository will be cloned to this directory."
+}
+
+# Installation functions
+setup_alias() {
     echo
-    # shellcheck disable=SC2162
-    read -p "Do you want to install? (y/n): " install_choice
+    log "Setting up cross-seed alias..."
+    sed -i '/\.xs-git\|\.cs-ultra/d' "$BASHRC"
+    
+    if curl -fsSL "$ALIAS_URL" >> "$BASHRC"; then
+        log "Successfully updated .bashrc"
+        log "Run 'source ~/.bashrc' or restart your shell to apply changes"
+        echo
+    else
+        error "Failed to download alias configuration"
+    fi
+}
+
+install_cross_seed() {
+    local target_branch="$1"
+    
+    log "Installing cross-seed ($target_branch)..."
     echo
-    if [ "$install_choice" == "y" ]; then
-      echo "Installing..."
-      if ! git clone https://github.com/cross-seed/cross-seed.git "$CS_GIT_DIR"; then
-        echo "Error: Failed to clone repository. Check your internet connection."
-        exit 1
-      fi
-      cd "$CS_GIT_DIR" || exit 1
-      echo "$INSTALL_BRANCH"
-      if [ "$INSTALL_BRANCH" == "stable" ]; then
-        INSTALL_BRANCH="${INSTALL_BRANCH/stable/$(get_stable_version)}"
-      fi
-      echo "$INSTALL_BRANCH"
-      if ! git checkout "$INSTALL_BRANCH"; then
-        echo "Error: Failed to checkout branch $INSTALL_BRANCH"
-        exit 1
-      fi
-      if [ "$INSTALL_BRANCH" == "legacy" ]; then
+    # Clone repository
+    git clone https://github.com/cross-seed/cross-seed.git "$CS_GIT_DIR" ||
+        error "Failed to clone repository"
+    
+    cd "$CS_GIT_DIR"
+    
+    # Handle stable branch (convert to tag)
+    if [[ "$target_branch" == "stable" ]]; then
+        target_branch=$(get_stable_version)
+    fi
+    
+    # Checkout target branch/tag
+    git checkout "$target_branch" || error "Failed to checkout $target_branch"
+    
+    # Apply legacy compatibility fix
+    if [[ "$target_branch" == "legacy" ]]; then
         sed -i 's/"better-sqlite3": "\^11\.5\.0",/"better-sqlite3": "^9.4.0",/' "$PACKAGE_JSON"
-      fi
-      if ! npm install .; then
-          echo "Error: npm install failed. Check your Node.js installation. The README on the GitHub repository contains installation instructions for nvm if you need them."
-          exit 1
-      fi
-      echo
-      echo "Transpiling cross-seed..."
-      if ! npm run build; then
-        echo "Error: Build failed"
-        exit 1
-      fi
-      echo "Installation complete."
-      echo
-      setup_alias
-      exit 0
-    else
-      echo "Exiting."
-      exit 0
     fi
-  else
-    echo "Exiting."
-    exit 0
-  fi
-fi
+    echo
+    # Install dependencies and build
+    npm install . || error "npm install failed. Check Node.js installation."
+    
+    log "Transpiling cross-seed..."
+    npm run build || error "Build failed"
+    
+    log "Installation complete."
+    setup_alias
+}
+
+# Main installation logic
+handle_existing_installation() {
+    local local_version remote_version
+    local_version=$(get_local_version)
+    
+    log "Local version detected: $local_version"
+    echo
+    # Handle corrupted installation
+    if [[ "$local_version" == "N/A" ]]; then
+        log "Critical files missing or corrupted installation detected."
+        if confirm "Full reinstallation is necessary. Proceed?"; then
+            echo "Proceeding with wipe and full reinstall..."
+            cleanup_all
+            install_cross_seed "$INSTALL_BRANCH"
+        else
+            log "Reinstallation canceled."
+            exit 0
+        fi
+        return
+    fi
+    
+    # Check for updates
+    if confirm "c $INSTALL_BRANCH branch?"; then
+        remote_version=$(get_remote_version "$([[ $INSTALL_BRANCH == "master" ]] && echo "all" || echo "latest")")
+        log "Latest version: $remote_version"
+        echo
+        # Handle nightly branch
+        if [[ "$INSTALL_BRANCH" == "nightly" ]]; then
+            log "Nightly is experimental and requires full reinstallation!"
+            echo
+
+            if confirm "Install/update to nightly ($(get_remote_version))?"; then
+                cleanup_all
+                install_cross_seed "$INSTALL_BRANCH"
+            elseW
+                log "Nightly installation canceled."
+                exit 0
+            fi
+            return
+        fi
+        
+        # Check if update needed
+        if [[ "$local_version" != "$remote_version" ]]; then
+            echo
+            if confirm "Update from $local_version to $remote_version?"; then
+                cleanup_all
+                install_cross_seed "$INSTALL_BRANCH"
+            else
+                log "Update canceled."
+            fi
+        else
+            log "You are already on the latest version."
+            log "To force reinstall, run with uninstall mode then reinstall."
+        fi
+    fi
+}
+
+handle_fresh_installation() {
+    local version
+    version=$(get_remote_version "$([[ $INSTALL_BRANCH == "master" ]] && echo "all" || echo "latest")")
+    
+    log "Local installation not present."
+    if confirm "Install $INSTALL_BRANCH ($version) of cross-seed?"; then
+        log "Repository will be cloned to $CS_GIT_DIR"
+        if confirm "Proceed with installation?"; then
+            install_cross_seed "$INSTALL_BRANCH"
+        fi
+    fi
+}
+
+# Main execution
+main() {
+    check_dependencies
+    detect_os_and_select_branch
+    
+    # Clean up legacy installations
+    [[ -d "$HOME/.cs-ultra" ]] && {
+        log "Detected legacy installation. Cleaning up..."
+        cleanup_legacy
+    }
+    
+    # Handle existing or fresh installation
+    if [[ -d "$CS_GIT_DIR" ]]; then
+        handle_existing_installation
+    else
+        handle_fresh_installation
+    fi
+}
+
+main "$@"
